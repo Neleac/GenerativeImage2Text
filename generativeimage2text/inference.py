@@ -1,12 +1,8 @@
+from azfuse import File
+import cv2
 import json
 import os.path as op
-from .common import qd_tqdm as tqdm
-from .common import json_dump
-from .common import pilimg_from_base64
-from .common import get_mpi_rank, get_mpi_size, get_mpi_local_rank
-
-from .tsv_io import TSVFile, tsv_writer, tsv_reader
-from .common import write_to_file
+import math
 import torch
 import PIL
 from pprint import pformat
@@ -14,10 +10,15 @@ import logging
 from transformers import BertTokenizer
 from torchvision.transforms import Compose, Resize, CenterCrop, ToTensor, Normalize
 from PIL import Image
-from azfuse import File
 
+from .common import qd_tqdm as tqdm
+from .common import json_dump
+from .common import pilimg_from_base64
+from .common import get_mpi_rank, get_mpi_size, get_mpi_local_rank
+from .common import write_to_file
 from .common import init_logging
 from .common import parse_general_args
+from .tsv_io import TSVFile, tsv_writer, tsv_reader
 from .tsv_io import load_from_yaml_file
 from .torch_common import torch_load
 from .torch_common import load_state_dict
@@ -63,23 +64,46 @@ class MinMaxResizeForTest(object):
         image = F.resize(img, size, interpolation=PIL.Image.BICUBIC)
         return image
 
+def test_git_inference_single_video(video_path, model_name, prefix):
+    MAX_FRAMES = 60
+
+    img = []
+    cap = cv2.VideoCapture(video_path)
+    total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+    sample_every_n_frames = math.ceil(total_frames / MAX_FRAMES)
+
+    idx = 0
+    while cap.isOpened():
+        ret, frame = cap.read()
+        if ret:
+            if idx % sample_every_n_frames == 0:
+                img.append(Image.fromarray(frame))
+        else:
+            break
+        idx += 1
+    cap.release()
+
+    print(len(img))
+
+    return test_git_inference(img, model_name, prefix)
 
 def test_git_inference_single_image(image_path, model_name, prefix):
+    if isinstance(image_path, str):
+        image_path = [image_path]
+    img = [load_image_by_pil(i) for i in image_path]
+
+    return test_git_inference(img, model_name, prefix)
+
+def test_git_inference(img, model_name, prefix):
     param = {}
     if File.isfile(f'aux_data/models/{model_name}/parameter.yaml'):
         param = load_from_yaml_file(f'aux_data/models/{model_name}/parameter.yaml')
-
-    tokenizer = BertTokenizer.from_pretrained('bert-base-uncased', do_lower_case=True)
-    if isinstance(image_path, str):
-        image_path = [image_path]
-    # if it is more than 1 image, it is normally a video with multiple image
-    # frames
-    img = [load_image_by_pil(i) for i in image_path]
-
+    
     transforms = get_image_transform(param)
     img = [transforms(i) for i in img]
-
+    
     # model
+    tokenizer = BertTokenizer.from_pretrained('bert-base-uncased', do_lower_case=True)
     model = get_git_model(tokenizer, param)
     pretrained = f'output/{model_name}/snapshot/model.pt'
     checkpoint = torch_load(pretrained)['model']
@@ -106,7 +130,8 @@ def test_git_inference_single_image(image_path, model_name, prefix):
             'prefix': torch.tensor(input_ids).unsqueeze(0).cuda(),
         })
     cap = tokenizer.decode(result['predictions'][0].tolist(), skip_special_tokens=True)
-    logging.info('output: {}'.format(cap))
+    #logging.info('output: {}'.format(cap))
+    return cap
 
 def get_image_transform(param):
     crop_size = param.get('test_crop_size', 224)
