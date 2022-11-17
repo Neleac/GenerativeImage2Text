@@ -89,7 +89,9 @@ def test_git_inference_single_video(video_path, model_name, prefix):
         ret, frame = cap.read()
         if not ret:
             break
-        img.append(Image.fromarray(frame))
+        frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        frame = Image.fromarray(frame)
+        img.append(frame)
 
     cap.release()
     return test_git_inference(img, model_name, prefix)
@@ -120,12 +122,10 @@ def test_git_inference(img, model_name, prefix):
     if len(payload) > max_text_len - 2:
         payload = payload[-(max_text_len - 2):]
     input_ids = [tokenizer.cls_token_id] + payload
+    pfx = torch.tensor(input_ids).unsqueeze(0).cuda()
 
     with torch.no_grad():
-        result = model({
-            'image': img,
-            'prefix': torch.tensor(input_ids).unsqueeze(0).cuda(),
-        })
+        result = model({'image': img, 'prefix': pfx})
     cap = tokenizer.decode(result['predictions'][0].tolist(), skip_special_tokens=True)
     #logging.info('output: {}'.format(cap))
     return cap
