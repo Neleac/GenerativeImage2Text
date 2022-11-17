@@ -58,7 +58,7 @@ def get_image_encoder(encoder_type, input_resolution=224):
         'CLIPViT_L_14': 'ViT-L/14',
     }
     name_in_clip = name_map[encoder_type]
-    model, _ = clip.load(name_in_clip, device='cpu', jit=False)
+    model, _ = clip.load(name_in_clip, jit=False)
     model = model.train()
     ret = model.visual
     ret.to(torch.float32)

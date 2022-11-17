@@ -1,6 +1,4 @@
-from torchvision.transforms import transforms
-from PIL import Image
-import logging
+from torchvision.transforms import transforms, InterpolationMode
 from ..common import dict_has_path, dict_get_path_value, dict_remove_path
 from ..common import dict_update_path_value
 
@@ -68,12 +66,12 @@ def get_inception_train_transform(
     no_aspect_dist=False,
     resize_crop=None,
     max_size=None,
-    interpolation=Image.BILINEAR,
+    interpolation=InterpolationMode.BILINEAR,
 ):
     if interpolation is None:
-        interpolation = Image.BILINEAR
+        interpolation = InterpolationMode.BILINEAR
     elif interpolation == 'bicubic':
-        interpolation = Image.BICUBIC
+        interpolation = InterpolationMode.BICUBIC
     totensor = transforms.ToTensor()
     all_trans = []
     if small_scale is None:

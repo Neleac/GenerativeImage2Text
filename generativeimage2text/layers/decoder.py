@@ -1195,7 +1195,7 @@ class GeneratorWithBeamSearch(object):
                 for idx, score in zip(next_words[batch_ex], next_scores[batch_ex]):
 
                     # get beam and word IDs
-                    beam_id = idx // vocab_size
+                    beam_id = torch.div(idx, vocab_size, rounding_mode='floor')
                     word_id = idx % vocab_size
 
                     # end of sentence, or next word

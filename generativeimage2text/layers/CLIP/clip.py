@@ -5,8 +5,7 @@ import warnings
 from typing import Union, List
 
 import torch
-from PIL import Image
-from torchvision.transforms import Compose, Resize, CenterCrop, ToTensor, Normalize
+from torchvision.transforms import Compose, Resize, CenterCrop, ToTensor, Normalize, InterpolationMode
 from tqdm import tqdm
 
 from .model import build_model
@@ -71,7 +70,7 @@ def load(name: str, device: Union[str, torch.device] = "cuda" if torch.cuda.is_a
     n_px = model.input_resolution.item()
 
     transform = Compose([
-        Resize(n_px, interpolation=Image.BICUBIC),
+        Resize(n_px, interpolation=InterpolationMode.BICUBIC),
         CenterCrop(n_px),
         lambda image: image.convert("RGB"),
         ToTensor(),

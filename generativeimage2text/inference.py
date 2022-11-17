@@ -1,15 +1,14 @@
 from azfuse import File
 import cv2
 import json
-import os.path as op
-import math
-import torch
-import PIL
-from pprint import pformat
 import logging
-from transformers import BertTokenizer
-from torchvision.transforms import Compose, Resize, CenterCrop, ToTensor, Normalize
+import os.path as op
+import PIL
 from PIL import Image
+from pprint import pformat
+import torch
+from torchvision.transforms import Compose, Resize, CenterCrop, ToTensor, Normalize, InterpolationMode
+from transformers import BertTokenizer
 
 from .common import qd_tqdm as tqdm
 from .common import json_dump
@@ -18,13 +17,12 @@ from .common import get_mpi_rank, get_mpi_size, get_mpi_local_rank
 from .common import write_to_file
 from .common import init_logging
 from .common import parse_general_args
-from .tsv_io import TSVFile, tsv_writer, tsv_reader
-from .tsv_io import load_from_yaml_file
+from .model import get_git_model
+from .process_image import load_image_by_pil
 from .torch_common import torch_load
 from .torch_common import load_state_dict
-from .process_image import load_image_by_pil
-from .model import get_git_model
-
+from .tsv_io import TSVFile, tsv_writer, tsv_reader
+from .tsv_io import load_from_yaml_file
 
 
 class MinMaxResizeForTest(object):
@@ -61,31 +59,41 @@ class MinMaxResizeForTest(object):
     def __call__(self, img):
         size = self.get_size(img.size)
         import torchvision.transforms.functional as F
-        image = F.resize(img, size, interpolation=PIL.Image.BICUBIC)
+        image = F.resize(img, size, interpolation=InterpolationMode.BICUBIC)
         return image
 
+
+def get_model_tokenizer_transforms(model_name):
+    param = {}
+    if File.isfile(f'aux_data/models/{model_name}/parameter.yaml'):
+        param = load_from_yaml_file(f'aux_data/models/{model_name}/parameter.yaml')
+
+    tokenizer = BertTokenizer.from_pretrained('bert-base-uncased', do_lower_case=True)
+    model = get_git_model(tokenizer, param)
+    pretrained = f'output/{model_name}/snapshot/model.pt'
+    checkpoint = torch_load(pretrained)['model']
+    load_state_dict(model, checkpoint)
+    model.cuda()
+    model.eval()
+
+    transforms = get_image_transform(param)
+
+    return model, tokenizer, transforms
+
+
 def test_git_inference_single_video(video_path, model_name, prefix):
-    MAX_FRAMES = 60
+    cap = cv2.VideoCapture(video_path)
 
     img = []
-    cap = cv2.VideoCapture(video_path)
-    total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-    sample_every_n_frames = math.ceil(total_frames / MAX_FRAMES)
-
-    idx = 0
-    while cap.isOpened():
+    while True:
         ret, frame = cap.read()
-        if ret:
-            if idx % sample_every_n_frames == 0:
-                img.append(Image.fromarray(frame))
-        else:
+        if not ret:
             break
-        idx += 1
+        img.append(Image.fromarray(frame))
+
     cap.release()
-
-    print(len(img))
-
     return test_git_inference(img, model_name, prefix)
+
 
 def test_git_inference_single_image(image_path, model_name, prefix):
     if isinstance(image_path, str):
@@ -94,23 +102,12 @@ def test_git_inference_single_image(image_path, model_name, prefix):
 
     return test_git_inference(img, model_name, prefix)
 
+
 def test_git_inference(img, model_name, prefix):
-    param = {}
-    if File.isfile(f'aux_data/models/{model_name}/parameter.yaml'):
-        param = load_from_yaml_file(f'aux_data/models/{model_name}/parameter.yaml')
-    
-    transforms = get_image_transform(param)
-    img = [transforms(i) for i in img]
-    
-    # model
-    tokenizer = BertTokenizer.from_pretrained('bert-base-uncased', do_lower_case=True)
-    model = get_git_model(tokenizer, param)
-    pretrained = f'output/{model_name}/snapshot/model.pt'
-    checkpoint = torch_load(pretrained)['model']
-    load_state_dict(model, checkpoint)
-    model.cuda()
-    model.eval()
-    img = [i.unsqueeze(0).cuda() for i in img]
+    model, tokenizer, transforms = get_model_tokenizer_transforms(model_name)
+
+    # image / video
+    img = [transforms(i).unsqueeze(0).cuda() for i in img]
 
     # prefix
     max_text_len = 40
@@ -133,6 +130,7 @@ def test_git_inference(img, model_name, prefix):
     #logging.info('output: {}'.format(cap))
     return cap
 
+
 def get_image_transform(param):
     crop_size = param.get('test_crop_size', 224)
     if 'test_respect_ratio_max' in param:
@@ -141,7 +139,7 @@ def get_image_transform(param):
         ]
     else:
         trans = [
-            Resize(crop_size, interpolation=Image.BICUBIC),
+            Resize(crop_size, interpolation=InterpolationMode.BICUBIC),
             CenterCrop(crop_size),
             lambda image: image.convert("RGB"),
 
@@ -156,10 +154,11 @@ def get_image_transform(param):
     transforms = Compose(trans)
     return transforms
 
+
 def test_git_inference_single_tsv(image_tsv, model_name, question_tsv, out_tsv):
     param = {}
-    if File.isfile(f'output/{model_name}/parameter.yaml'):
-        param = load_from_yaml_file(f'output/{model_name}/parameter.yaml')
+    if File.isfile(f'aux_data/{model_name}/parameter.yaml'):
+        param = load_from_yaml_file(f'aux_data/{model_name}/parameter.yaml')
 
     tokenizer = BertTokenizer.from_pretrained('bert-base-uncased', do_lower_case=True)
     image_tsv = TSVFile(image_tsv)
@@ -249,9 +248,11 @@ def test_git_inference_single_tsv(image_tsv, model_name, question_tsv, out_tsv):
         from .tsv_io import concat_tsv_files
         concat_tsv_files(all_sub_tsv, out_tsv)
 
+
 def convert_tsv_to_vqa_json(predict_file, out_json):
     result = [json.loads(s) for s, in tsv_reader(predict_file)]
     write_to_file(json_dump(result), out_json)
+
 
 def convert_tsv_to_coco_format(res_tsv, outfile,
         sep='\t', key_col=0, cap_col=1):
@@ -276,6 +277,7 @@ def convert_tsv_to_coco_format(res_tsv, outfile,
     with open(outfile, 'w') as fp:
         json.dump(results, fp)
 
+
 def iter_caption_to_json(iter_caption, json_file):
     # save gt caption to json format so thet we can call the api
     key_captions = [(key, json.loads(p)) for key, p in iter_caption]
@@ -298,6 +300,7 @@ def iter_caption_to_json(iter_caption, json_file):
             n += 1
     info['annotations'] = annotations
     write_to_file(json.dumps(info), json_file)
+
 
 def evaluate_on_coco_caption(res_file, label_file, outfile=None,
                              ):
@@ -337,6 +340,7 @@ def evaluate_on_coco_caption(res_file, label_file, outfile=None,
             json.dump(result, fp, indent=4)
     return result
 
+
 if __name__ == '__main__':
     init_logging()
     kwargs = parse_general_args()
@@ -344,4 +348,3 @@ if __name__ == '__main__':
     function_name = kwargs['type']
     del kwargs['type']
     locals()[function_name](**kwargs)
-
