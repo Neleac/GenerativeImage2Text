@@ -42,14 +42,7 @@ def multiple_videos_inference(model, tokenizer, transforms, videos_path, output_
     for root, _, files in os.walk(videos_path):
         for i, file in enumerate(files):
             filename, _ = os.path.splitext(file)
-
-            if i >= 3:
-                break
-
             video_path = os.path.join(root, file)
-
-            if i == 0:
-                video_path += 'lol'
 
             try:
                 caption = single_video_inference(model, tokenizer, transforms, video_path)
