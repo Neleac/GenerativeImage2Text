@@ -46,10 +46,10 @@ def multiple_videos_inference(model, tokenizer, transforms, videos_path, output_
 
             try:
                 caption = single_video_inference(model, tokenizer, transforms, video_path)
-                print('\n VIDEO %d (%s): %s \n' % (i + 1, filename, caption))
+                print('VIDEO %d (%s): %s' % (i + 1, filename, caption))
             except:
                 failed.add(filename)
-                print('\n VIDEO %d (%s): %s \n' % (i + 1, filename, 'FAILED'))
+                print('VIDEO %d (%s): %s' % (i + 1, filename, 'FAILED'))
                 continue
             
             if output_name:
@@ -78,6 +78,6 @@ model, tokenizer, transforms = get_model_tokenizer_transforms(model_name)
 # caption = single_video_inference(model, tokenizer, transforms, video_path)
 # print(caption)
 
-videos_path = '../../Downloads/vatex/test_videos'
+videos_path = '../../Downloads/vatex/vatex_test'
 output_name = 'git_base_captions'
 multiple_videos_inference(model, tokenizer, transforms, videos_path, output_name)
